@@ -98,7 +98,7 @@ pipeline {
             }
         }
 
-       stage('Push images to ECR') {
+        stage('Push images to ECR') {
     steps {
         sh '''
         aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
@@ -114,9 +114,6 @@ pipeline {
         '''
     }
 }
-                
-            }
-        }
 
         // stage('Deploy to k8s') {
         //     steps {
