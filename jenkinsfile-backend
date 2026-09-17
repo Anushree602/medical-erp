@@ -98,20 +98,23 @@ pipeline {
             }
         }
 
-        stage('Push images to ECR') {
-            steps {
-                sh '''
-                aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
+       stage('Push images to ECR') {
+    steps {
+        sh '''
+        aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
 
-               docker tag order-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
-               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
+        docker tag order-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
+        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
 
-               docker tag product-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
-               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
+        docker tag product-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
+        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
 
-               docker tag user-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
-               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
-                '''
+        docker tag user-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+        '''
+    }
+}
+                
             }
         }
 
