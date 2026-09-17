@@ -98,22 +98,22 @@ pipeline {
             }
         }
 
-        // stage('Push images to ECR') {
-        //     steps {
-        //         sh '''
-        //         aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin 506995420953.dkr.ecr.us-east-2.amazonaws.com
+        stage('Push images to ECR') {
+            steps {
+                sh '''
+                aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
 
-        //         docker tag user-service:latest 506995420953.dkr.ecr.us-east-2.amazonaws.com/users-service:latest
-        //         docker push 506995420953.dkr.ecr.us-east-2.amazonaws.com/users-service:latest
+               docker tag order-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
+               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
 
-        //         docker tag product-service:latest 506995420953.dkr.ecr.us-east-2.amazonaws.com/products-service:latest
-        //         docker push 506995420953.dkr.ecr.us-east-2.amazonaws.com/products-service:latest
+               docker tag product-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
+               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
 
-        //         docker tag order-service:latest 506995420953.dkr.ecr.us-east-2.amazonaws.com/orders-service:latest
-        //         docker push 506995420953.dkr.ecr.us-east-2.amazonaws.com/orders-service:latest
-        //         '''
-        //     }
-        // }
+               docker tag user-repo:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+               docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+                '''
+            }
+        }
 
         // stage('Deploy to k8s') {
         //     steps {
