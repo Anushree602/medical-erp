@@ -33,7 +33,7 @@ pipeline {
 
         stage('SonarQubeAnalysis - user service') {
             steps {
-                withSonarQubeEnv('sonar-token') {
+                withSonarQubeEnv('sonar') {
                     dir('user-service') {
                         sh 'mvn sonar:sonar'
                     }
@@ -56,7 +56,7 @@ pipeline {
 
         stage('SonarQubeAnalysis - product service') {
             steps {
-                withSonarQubeEnv('sonar-token') {
+                withSonarQubeEnv('sonar') {
                     dir('product-service') {
                         sh 'mvn sonar:sonar'
                     }
@@ -79,7 +79,7 @@ pipeline {
 
         stage('SonarQubeAnalysis - order service') {
             steps {
-                withSonarQubeEnv('sonar-token') {
+                withSonarQubeEnv('sonar') {
                     dir('order-service') {
                         sh 'mvn sonar:sonar'
                     }
