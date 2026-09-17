@@ -35,7 +35,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonar') {
                     dir('user-service') {
-                        sh 'mvn sonar:sonar'
+                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
                     }
                 }
             }
@@ -58,7 +58,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonar') {
                     dir('product-service') {
-                        sh 'mvn sonar:sonar'
+                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
                     }
                 }
             }
@@ -81,7 +81,7 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonar') {
                     dir('order-service') {
-                        sh 'mvn sonar:sonar'
+                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
                     }
                 }
             }
