@@ -209,6 +209,100 @@ pipeline {
                }
             }
         }
+        stage('Deploy to K8s') {
+    steps {
+        withCredentials([
+            [$class: 'AmazonWebServicesCredentialsBinding',
+             credentialsId: 'AWS-cred']
+        ]) {
+            sh '''
+                set -e
+
+                echo "========================================"
+                echo "AWS Authentication"
+                echo "========================================"
+
+                aws sts get-caller-identity
+
+                echo "========================================"
+                echo "Configure EKS"
+                echo "========================================"
+
+                aws eks update-kubeconfig \
+                    --region ${AWS_REGION} \
+                    --name eks-1
+
+                echo "========================================"
+                echo "Apply ConfigMaps"
+                echo "========================================"
+
+                kubectl apply -f k8s/configmaps/ -n med-erp
+
+                echo "========================================"
+                echo "Apply Deployments"
+                echo "========================================"
+
+                kubectl apply -f k8s/deployments/ -n med-erp
+
+                echo "========================================"
+                echo "Apply HPA"
+                echo "========================================"
+
+                kubectl apply -f k8s/hpa/ -n med-erp
+
+                echo "========================================"
+                echo "Apply Services"
+                echo "========================================"
+
+                kubectl apply -f k8s/services/ -n med-erp
+
+                echo "========================================"
+                echo "Apply Ingress"
+                echo "========================================"
+
+                kubectl apply -f k8s/ingress/ingressclass.yaml
+                kubectl apply -f k8s/ingress/ingress.yaml -n med-erp
+
+                echo "========================================"
+                echo "Waiting for Deployments"
+                echo "========================================"
+
+                kubectl rollout status deployment/user-service \
+                    -n med-erp --timeout=5m
+
+                kubectl rollout status deployment/product-service \
+                    -n med-erp --timeout=5m
+
+                kubectl rollout status deployment/order-service \
+                    -n med-erp --timeout=5m
+
+                echo "========================================"
+                echo "Pods"
+                echo "========================================"
+
+                kubectl get pods -n med-erp
+
+                echo "========================================"
+                echo "Services"
+                echo "========================================"
+
+                kubectl get svc -n med-erp
+
+                echo "========================================"
+                echo "HPA"
+                echo "========================================"
+
+                kubectl get hpa -n med-erp
+
+                echo "========================================"
+                echo "Ingress"
+                echo "========================================"
+
+                kubectl get ingress -n med-erp
+            '''
+        }
+    }
+}
 
         // stage('Checkout GitOps Repository') {
         //     steps {
@@ -338,6 +432,8 @@ pipeline {
         }
     }
 }
+
+
 
 // ==========================================================================================================================================
 
@@ -538,31 +634,31 @@ pipeline {
 //     }
 // }
 
-//         stage('Deploy to k8s') {
-//             steps {
-//                 sh '''
-//                 aws sts get-caller-identity
-//                 aws s3 ls
-//                 aws eks update-kubeconfig --region ap-south-1 --name eks-1
-//                 kubectl apply -f k8s/configmaps/
-//                 kubectl apply -f k8s/deployments/
-//                 kubectl apply -f k8s/hpa/
-//                 kubectl apply -f k8s/services/
-//                 kubectl apply -f k8s/ingress/ingressclass.yaml
-//                 kubectl apply -f k8s/ingress/ingress.yaml
+        // stage('Deploy to k8s') {
+        //     steps {
+        //         sh '''
+        //         aws sts get-caller-identity
+        //         aws s3 ls
+        //         aws eks update-kubeconfig --region ap-south-1 --name eks-1
+        //         kubectl apply -f k8s/configmaps/
+        //         kubectl apply -f k8s/deployments/
+        //         kubectl apply -f k8s/hpa/
+        //         kubectl apply -f k8s/services/
+        //         kubectl apply -f k8s/ingress/ingressclass.yaml
+        //         kubectl apply -f k8s/ingress/ingress.yaml
 
-//                 kubectl rollout status deployment/user-service -n med-erp
-//                 kubectl rollout status deployment/product-service -n med-erp
-//                 kubectl rollout status deployment/order-service -n med-erp
+        //         kubectl rollout status deployment/user-service -n med-erp
+        //         kubectl rollout status deployment/product-service -n med-erp
+        //         kubectl rollout status deployment/order-service -n med-erp
 
-//                 kubectl get pods -n med-erp
-//                 kubectl get svc -n med-erp
-//                 kubectl get hpa -n med-erp
-//                 kubectl get ingress -n med-erp
-//                 '''
+        //         kubectl get pods -n med-erp
+        //         kubectl get svc -n med-erp
+        //         kubectl get hpa -n med-erp
+        //         kubectl get ingress -n med-erp
+        //         '''
                 
-//             }
-//         }
+        //     }
+        // }
 //     }
 // }
 
