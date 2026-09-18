@@ -118,6 +118,7 @@ pipeline {
         stage('Deploy to k8s') {
             steps {
                 withAWS(credentials: ${my_aws_credential}, region: 'us-east-1')
+              {
                 sh '''
                 aws sts get-caller-identity
                 aws s3 ls
@@ -138,6 +139,7 @@ pipeline {
                 kubectl get hpa -n med-erp
                 kubectl get ingress -n med-erp
                 '''
+                }
             }
         }
     }
