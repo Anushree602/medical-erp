@@ -10,7 +10,7 @@ pipeline {
     { label 'Anu' }
 
     tools {
-        maven 'mvn
+        maven 'mvn'
     }
 
     environment {
