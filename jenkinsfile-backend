@@ -117,7 +117,7 @@ pipeline {
 
         stage('Deploy to k8s') {
             steps {
-                withAWS(credentials: ${my_aws_credential}, region: 'us-east-1')
+                withAWS(credentials: 'AWS-cred', region: 'us-east-1')
               {
                 sh '''
                 aws sts get-caller-identity
