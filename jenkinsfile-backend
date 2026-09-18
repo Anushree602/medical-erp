@@ -102,7 +102,7 @@ pipeline {
 
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('Sonar-scanner') {
+                withSonarQubeEnv('sonar') {
                     withCredentials([
                 string(
                     credentialsId: 'sonar-token',
