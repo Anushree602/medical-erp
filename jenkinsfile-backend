@@ -1,88 +1,144 @@
+// Backend — build, test; on main: Docker Hub/ECR login, push to ECR, deploy to EKS.
+//
+// In Jenkins: Manage Credentials → add these IDs exactly:
+//   aws-credentials   — AWS Credentials (ECR, STS)
+//   docker-registry     — Username + password (docker login before build; use Docker Hub token or your registry user)
+//   kubeconfig          — Secret file (kubectl context for the cluster)
+
 pipeline {
-    agent {
-        label 'Anu'
-    }
+    agent
+    { label 'Anu' }
 
     tools {
-        maven 'mvn'
+        maven 'mvn
     }
 
     environment {
-        my_aws_credential = credentials('AWS-cred')
+        AWS_REGION    = 'ap-south-1'
+        ECR_REGISTRY  = '419819289041.dkr.ecr.ap-south-1.amazonaws.com'
+        AWS_DEFAULT_REGION = 'ap-south-1'
+        AWS_ECR_REPO_NAME = 'med-erp'
+        // GITOPS_REPO   = 'https://github.com/Kapish0879/med-erp-gitops.git'
+        // GITOPS_BRANCH = 'main'
+    }
+
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(
+            logRotator(numToKeepStr: '20')
+        )
     }
 
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/Anushree602/medical-erp.git'
+                checkout scm
             }
         }
 
-        stage('Build User-service') {
+        stage('Environment Check') {
             steps {
-                dir('user-service') {
-                    sh 'mvn clean package -DskipTests'
-                }
+                sh '''
+                    set -e
+
+                    echo "Java:"
+                    java -version
+
+                    echo "Maven:"
+                    mvn -version
+
+                    echo "Docker:"
+                    docker --version
+
+                    echo "AWS:"
+                    aws --version
+
+                    echo "Trivy:"
+                    trivy --version
+
+                '''
             }
+        }
+
+        stage('Build & Unit Test') {
+            steps {
+                sh '''
+                    set -e
+
+                    for svc in user-service product-service order-service; do
+
+                        echo "====================================="
+                        echo "Building $svc"
+                        echo "====================================="
+
+                        cd "$WORKSPACE/$svc"
+
+                        mvn -B clean verify
+
+                    done
+                '''
+            }
+
             post {
-                success {
-                    archiveArtifacts artifacts: 'user-service/target/*.jar', fingerprint: true
+                always {
+                    sh '''
+                      echo "========================================"
+                      echo "JUnit REPORTS"
+                      echo "========================================"
+
+                      find "$WORKSPACE" \
+                      -path "*/target/surefire-reports/*.xml" \
+                      -type f \
+                      -print
+
+                      '''
+                    junit(
+                        testResults: '**/target/surefire-reports/*.xml',
+                        allowEmptyResults: false
+                    )
                 }
             }
         }
 
-        stage('SonarQubeAnalysis - user service') {
+        stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('sonar') {
-                    dir('user-service') {
-                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
-                    }
+                withSonarQubeEnv('SonarQube') {
+                    withCredentials([
+                string(
+                    credentialsId: 'sonar-token',
+                    variable: 'SONAR_TOKEN'
+                )
+            ]) {
+                        sh '''
+                    set -e
+
+                    for svc in user-service product-service order-service; do
+
+                        echo "====================================="
+                        echo "SonarQube: $svc"
+                        echo "====================================="
+
+                        cd "$WORKSPACE/$svc"
+
+                        mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.2.0.4988:sonar \
+                        -Dsonar.projectKey="med-erp-$svc" \
+                        -Dsonar.projectName="med-erp-$svc" \
+                        -Dsonar.host.url="$SONAR_HOST_URL" \
+                        -Dsonar.token="$SONAR_TOKEN"
+
+                    done
+                '''
+            }
                 }
             }
         }
 
-        stage('Build Product-Service') {
+        stage('Quality Gate') {
             steps {
-                dir('product-service') {
-                    sh 'mvn clean package -DskipTests'
-                }
-            }
-            post {
-                success {
-                    archiveArtifacts artifacts: 'product-service/target/*.jar', fingerprint: true
-                }
-            }
-        }
-
-        stage('SonarQubeAnalysis - product service') {
-            steps {
-                withSonarQubeEnv('sonar') {
-                    dir('product-service') {
-                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
-                    }
-                }
-            }
-        }
-
-        stage('Build Order Service') {
-            steps {
-                dir('order-service') {
-                    sh 'mvn clean package -DskipTests'
-                }
-            }
-            post {
-                success {
-                    archiveArtifacts artifacts: 'order-service/target/*.jar', fingerprint: true
-                }
-            }
-        }
-
-        stage('SonarQubeAnalysis - order service') {
-            steps {
-                withSonarQubeEnv('sonar') {
-                    dir('order-service') {
-                        sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
-                    }
+                timeout(time: 10, unit: 'MINUTES') {
+                    waitForQualityGate(
+                        abortPipeline: true
+                    )
                 }
             }
         }
@@ -90,56 +146,423 @@ pipeline {
         stage('Docker Build') {
             steps {
                 sh '''
-                docker build -t user-service:latest ./user-service
-                docker build -t product-service:latest ./product-service 
-                docker build -t order-service:latest ./order-service
-                docker images
+                    set -e
+                    for svc in user-service product-service order-service; do
+
+                        echo "====================================="
+                        echo "Docker Build: $svc"
+                        echo "====================================="
+
+                        docker build -t ${ECR_REGISTRY}/${AWS_ECR_REPO_NAME}:${svc}-${BUILD_NUMBER} ./$svc
+                        docker images
+
+                    done
                 '''
             }
         }
 
-        stage('Push images to ECR') {
-    steps {
-        sh '''
-        aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
-
-        docker tag order-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
-        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
-
-        docker tag product-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
-        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
-
-        docker tag user-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
-        docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
-        '''
-    }
-}
-
-        stage('Deploy to k8s') {
+        stage('trivy image scanning') {
             steps {
                 sh '''
-                aws sts get-caller-identity
-                aws s3 ls
-                aws eks update-kubeconfig --region ap-south-1 --name eks-1
-                kubectl apply -f k8s/configmaps/
-                kubectl apply -f k8s/deployments/
-                kubectl apply -f k8s/hpa/
-                kubectl apply -f k8s/services/
-                kubectl apply -f k8s/ingress/ingressclass.yaml
-                kubectl apply -f k8s/ingress/ingress.yaml
+                set -e
 
-                kubectl rollout status deployment/user-service -n med-erp
-                kubectl rollout status deployment/product-service -n med-erp
-                kubectl rollout status deployment/order-service -n med-erp
+             for svc in user-service product-service order-service; do
+                echo "====================================="
+                TEMPDIR=/opt/temp-trivy \
+                trivy image \
+                --cache-dir /opt/trivy-cache \
+                --scanners vuln \
+                --severity HIGH,CRITICAL \
+                --exit-code 0 \
+                ${ECR_REGISTRY}/${AWS_ECR_REPO_NAME}:${svc}-${BUILD_NUMBER}
 
-                kubectl get pods -n med-erp
-                kubectl get svc -n med-erp
-                kubectl get hpa -n med-erp
-                kubectl get ingress -n med-erp
-                '''
-                
+                done
+            '''
             }
+        }
+
+        stage('Push Images to ECR') {
+            steps {
+                withCredentials([
+              [$class: 'AmazonWebServicesCredentialsBinding',
+               credentialsId: 'AWS-cred']])
+               {
+                    sh '''
+                     set -e
+
+                     echo "Logging in to Amazon ECR..."
+
+                     aws ecr get-login-password --region ${AWS_REGION} | \
+                     docker login --username AWS --password-stdin \
+                     ${ECR_REGISTRY}
+
+                     for svc in user-service product-service order-service; do
+
+                     IMAGE="${ECR_REGISTRY}/${AWS_ECR_REPO_NAME}:${svc}-${BUILD_NUMBER}"
+                     echo "Pushing:"
+                     echo "$IMAGE"
+
+                     docker push "$IMAGE"
+
+                     done
+                     '''
+               }
+            }
+        }
+
+        // stage('Checkout GitOps Repository') {
+        //     steps {
+        //         dir('gitops') {
+        //             withCredentials([
+        //         string(
+        //             credentialsId: 'GITHUB-TOKEN',
+        //             variable: 'GIT_TOKEN'
+        //         )
+        //     ]) {
+        //                 sh '''
+        //             set -e
+
+        //             echo "========================================"
+        //             echo "Cloning GitOps Repository"
+        //             echo "========================================"
+
+        //             git clone \
+        //                 https://${GIT_TOKEN}@github.com/Kapish0879/med-erp-gitops.git .
+
+        //             git checkout main
+        //             git pull origin main
+
+        //             git branch --show-current
+
+        //             git remote -v
+        //         '''
+        //     }
+        //         }
+        //     }
+        // }
+
+        // stage('Update Deployment Files') {
+        //     steps {
+        //         dir('gitops') {
+        //             sh '''
+        //         set -e
+
+        //          for svc in user-service product-service order-service; do
+
+        //         echo "${svc} Deployment File"
+        //         sed -i \
+        //         "s|image: .*:${svc}-[0-9]*|image: ${ECR_REGISTRY}/${AWS_ECR_REPO_NAME}:${svc}-${BUILD_NUMBER}|" \
+        //         k8s/deployments/${svc}-deployment.yaml
+
+        //         done
+        //         grep -R "image:" k8s/deployments/
+        //     '''
+        //         }
+        //     }
+        // }
+
+        // stage('Commit and Push GitOps Changes') {
+        //     steps {
+        //         dir('gitops') {
+        //             withCredentials([
+        //         string(
+        //             credentialsId: 'GITHUB-TOKEN',
+        //             variable: 'GIT_TOKEN'
+        //         )
+        //     ]) {
+        //         sh '''
+        //             set -e
+
+        //             git config user.name "Jenkins"
+        //             git config user.email "jenkins@localhost"
+
+        //             git status
+
+        //             git add k8s/deployments/
+
+        //             git commit -m "Update application images to ${BUILD_NUMBER}"
+
+        //             echo "========================================"
+        //             echo "Pushing to GitOps Repository"
+        //             echo "========================================"
+
+        //             git push \
+        //                 https://${GIT_TOKEN}@github.com/Kapish0879/med-erp-gitops.git \
+        //                 HEAD:${GITOPS_BRANCH}
+
+        //             echo "GitOps repository updated successfully."
+        //         '''
+        //     }
+        //         }
+        //     }
+        // }
+    }
+
+    post {
+        success {
+                echo'''
+                 ========================================
+                   CI PIPELINE SUCCESS
+                  ========================================
+
+                  Images pushed to ECR.
+
+                  GitOps repository updated.
+
+                  Argo CD should now synchronize
+                  the new images to EKS.
+                '''
+        }
+
+        failure {
+            echo '''
+                ========================================
+                CI PIPELINE FAILED
+                ========================================
+
+                Check the failed stage above.
+                ========================================
+            '''
+        }
+
+        always {
+                // Remove all files from Jenkins workspace
+                cleanWs()
+            sh '''
+          # Remove all images
+            docker rmi -f $(docker images -aq) 2>/dev/null || true
+
+             #display docker images
+                docker images
+             '''
         }
     }
 }
+
+// ==========================================================================================================================================
+
+// pipeline {
+//     agent any
+
+//     environment {
+//         AWS_REGION    = 'us-east-1'
+//         K8S_NAMESPACE = 'med-erp'
+//         IMAGE_TAG     = "${env.GIT_COMMIT ? env.GIT_COMMIT.take(8) : "b${env.BUILD_NUMBER}"}"
+//     }
+
+//     options {
+//         timeout(time: 45, unit: 'MINUTES')
+//         buildDiscarder(logRotator(numToKeepStr: '20'))
+//     }
+
+//     stages {
+//         stage('Checkout') {
+//             steps { checkout scm }
+//         }
+
+//         stage('Build & test') {
+//             steps {
+//                 sh '''
+//                     set -e
+//                     for svc in user-service product-service order-service; do
+//                       echo "=== $svc ==="
+//                       (cd "$svc" && mvn -B clean verify)
+//                     done
+//                 '''
+//             }
+//             post {
+//                 always {
+//                     junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
+//                 }
+//             }
+//         }
+
+//         stage('Docker push & deploy') {
+//             when { branch 'main' }
+//             steps {
+//                 withCredentials([
+//                     [$class: 'AmazonWebServicesCredentialsBinding',
+//                      credentialsId: 'aws-credentials',
+//                      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+//                      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'],
+//                     usernamePassword(credentialsId: 'docker-registry',
+//                                      usernameVariable: 'DOCKER_USER',
+//                                      passwordVariable: 'DOCKER_PASS'),
+//                     file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')
+//                 ]) {
+//                     sh '''
+//                         set -e
+//                         echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+
+//                         ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+//                         ECR_REGISTRY="${ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+//                         aws ecr get-login-password --region "$AWS_REGION" | \
+//                           docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+//                         for svc in user-service product-service order-service; do
+//                           docker build -t "$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG" \
+//                             -t "$ECR_REGISTRY/med-erp/$svc:latest" "$svc/"
+//                           docker push "$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG"
+//                           docker push "$ECR_REGISTRY/med-erp/$svc:latest"
+//                         done
+
+//                         for svc in user-service product-service order-service; do
+//                           kubectl set image "deployment/$svc" "$svc=$ECR_REGISTRY/med-erp/$svc:$IMAGE_TAG" -n "$K8S_NAMESPACE"
+//                           kubectl rollout status "deployment/$svc" -n "$K8S_NAMESPACE" --timeout=5m
+//                         done
+//                     '''
+//                 }
+//             }
+//         }
+//     }
+
+//     post {
+//         always { cleanWs() }
+//     }
+// }
+
+// pipeline {
+//     agent {
+//         label 'Anu'
+//     }
+
+//     tools {
+//         maven 'mvn'
+//     }
+
+//     environment {
+//         my_aws_credential = credentials('AWS-cred')
+//     }
+
+//     stages {
+//         stage('Checkout') {
+//             steps {
+//                 git branch: 'main', url: 'https://github.com/Anushree602/medical-erp.git'
+//             }
+//         }
+
+//         stage('Build User-service') {
+//             steps {
+//                 dir('user-service') {
+//                     sh 'mvn clean package -DskipTests'
+//                 }
+//             }
+//             post {
+//                 success {
+//                     archiveArtifacts artifacts: 'user-service/target/*.jar', fingerprint: true
+//                 }
+//             }
+//         }
+
+//         stage('SonarQubeAnalysis - user service') {
+//             steps {
+//                 withSonarQubeEnv('sonar') {
+//                     dir('user-service') {
+//                         sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Build Product-Service') {
+//             steps {
+//                 dir('product-service') {
+//                     sh 'mvn clean package -DskipTests'
+//                 }
+//             }
+//             post {
+//                 success {
+//                     archiveArtifacts artifacts: 'product-service/target/*.jar', fingerprint: true
+//                 }
+//             }
+//         }
+
+//         stage('SonarQubeAnalysis - product service') {
+//             steps {
+//                 withSonarQubeEnv('sonar') {
+//                     dir('product-service') {
+//                         sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Build Order Service') {
+//             steps {
+//                 dir('order-service') {
+//                     sh 'mvn clean package -DskipTests'
+//                 }
+//             }
+//             post {
+//                 success {
+//                     archiveArtifacts artifacts: 'order-service/target/*.jar', fingerprint: true
+//                 }
+//             }
+//         }
+
+//         stage('SonarQubeAnalysis - order service') {
+//             steps {
+//                 withSonarQubeEnv('sonar') {
+//                     dir('order-service') {
+//                         sh 'mvn org.sonarsource.scanner.maven:sonar-maven-plugin:sonar'
+//                     }
+//                 }
+//             }
+//         }
+
+//         stage('Docker Build') {
+//             steps {
+//                 sh '''
+//                 docker build -t user-service:latest ./user-service
+//                 docker build -t product-service:latest ./product-service 
+//                 docker build -t order-service:latest ./order-service
+//                 docker images
+//                 '''
+//             }
+//         }
+
+//         stage('Push images to ECR') {
+//     steps {
+//         sh '''
+//         aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin 419819289041.dkr.ecr.ap-south-1.amazonaws.com
+
+//         docker tag order-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
+//         docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/order-repo:latest
+
+//         docker tag product-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
+//         docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/product-repo:latest
+
+//         docker tag user-service:latest 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+//         docker push 419819289041.dkr.ecr.ap-south-1.amazonaws.com/user-repo:latest
+//         '''
+//     }
+// }
+
+//         stage('Deploy to k8s') {
+//             steps {
+//                 sh '''
+//                 aws sts get-caller-identity
+//                 aws s3 ls
+//                 aws eks update-kubeconfig --region ap-south-1 --name eks-1
+//                 kubectl apply -f k8s/configmaps/
+//                 kubectl apply -f k8s/deployments/
+//                 kubectl apply -f k8s/hpa/
+//                 kubectl apply -f k8s/services/
+//                 kubectl apply -f k8s/ingress/ingressclass.yaml
+//                 kubectl apply -f k8s/ingress/ingress.yaml
+
+//                 kubectl rollout status deployment/user-service -n med-erp
+//                 kubectl rollout status deployment/product-service -n med-erp
+//                 kubectl rollout status deployment/order-service -n med-erp
+
+//                 kubectl get pods -n med-erp
+//                 kubectl get svc -n med-erp
+//                 kubectl get hpa -n med-erp
+//                 kubectl get ingress -n med-erp
+//                 '''
+                
+//             }
+//         }
+//     }
+// }
 
