@@ -228,9 +228,13 @@ pipeline {
                 echo "Configure EKS"
                 echo "========================================"
 
-                aws eks update-kubeconfig \
-                    --region ${AWS_REGION} \
-                    --name eks-1
+                aws eks update-kubeconfig --region ${AWS_REGION} --name eks-1
+
+                echo "========================================"
+                echo "Check Kubernetes Connection"
+                echo "========================================"
+
+                kubectl get nodes
 
                 echo "========================================"
                 echo "Apply ConfigMaps"
@@ -267,14 +271,11 @@ pipeline {
                 echo "Waiting for Deployments"
                 echo "========================================"
 
-                kubectl rollout status deployment/user-service \
-                    -n med-erp --timeout=5m
+                kubectl rollout status deployment/user-service -n med-erp --timeout=5m
 
-                kubectl rollout status deployment/product-service \
-                    -n med-erp --timeout=5m
+                kubectl rollout status deployment/product-service -n med-erp --timeout=5m
 
-                kubectl rollout status deployment/order-service \
-                    -n med-erp --timeout=5m
+                kubectl rollout status deployment/order-service -n med-erp --timeout=5m
 
                 echo "========================================"
                 echo "Pods"
@@ -299,6 +300,10 @@ pipeline {
                 echo "========================================"
 
                 kubectl get ingress -n med-erp
+
+                echo "========================================"
+                echo "Deployment Completed Successfully"
+                echo "========================================"
             '''
         }
     }
