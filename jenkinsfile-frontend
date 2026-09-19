@@ -4,7 +4,9 @@
 // Set on the Jenkins controller (Global properties or job env): DOMAIN_NAME, S3_BUCKET_NAME, AWS_REGION, CLOUDFRONT_DISTRIBUTION_ID (optional)
 
 pipeline {
-    agent 
+    agent {
+         label 'Anu'
+    }
 
     environment {
         AWS_REGION     = "${env.AWS_REGION ?: 'ap-south-1'}"
