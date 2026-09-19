@@ -1,217 +1,74 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Jenkins Pipeline — Frontend CI/CD (React → S3 → CloudFront)
+// Frontend — npm build; on main: S3 + optional CloudFront invalidation.
 //
-// Credentials required:
-//   AWS_CREDENTIALS — AWS Access Key + Secret
-// Environment variables (set at Jenkins system or pipeline level):
-//   S3_BUCKET_NAME, CLOUDFRONT_DISTRIBUTION_ID, VITE_*
-// ─────────────────────────────────────────────────────────────────────────────
+// Global credentials: aws-credentials (AWS)
+// Set on the Jenkins controller (Global properties or job env): DOMAIN_NAME, S3_BUCKET_NAME, AWS_REGION, CLOUDFRONT_DISTRIBUTION_ID (optional)
 
 pipeline {
-    agent {
-        kubernetes {
-            yaml '''
-apiVersion: v1
-kind: Pod
-spec:
-  containers:
-  - name: node
-    image: node:20-alpine
-    command: [cat]
-    tty: true
-  - name: awscli
-    image: amazon/aws-cli:latest
-    command: [cat]
-    tty: true
-'''
-        }
-    }
+    agent 
 
     environment {
-        AWS_REGION               = 'ap-south-1'
-        S3_BUCKET_NAME           = 'deployment-by-anu'
-        CLOUDFRONT_DISTRIBUTION  = "${env.CLOUDFRONT_DISTRIBUTION_ID}"
+        AWS_REGION     = "${env.AWS_REGION ?: 'ap-south-1'}"
+        S3_BUCKET_NAME = "${env.S3_BUCKET_NAME ?: 'deployment-by-anu'}"
+        DOMAIN_NAME    = "${env.DOMAIN_NAME ?: 'deploybyanushree.space'}"
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
         timeout(time: 20, unit: 'MINUTES')
-        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
-//     stages {
+    stages {
+        stage('Checkout') {
+            steps { checkout scm }
+        }
 
-//         stage('Checkout') {
-//             steps {
-//                 checkout scm
-//             }
-//         }
+        stage('Build') {
+            steps {
+                dir('frontend') {
+                    sh '''
+                        set -e
+                        npm ci
+                        npm run lint
+                        export VITE_USER_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
+                        export VITE_PRODUCT_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
+                        export VITE_ORDER_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
+                        npm run build
+                    '''
+                }
+            }
+        }
 
-//         stage('Install Dependencies') {
-//             steps {
-//                 container('node') {
-//                     dir('frontend') {
-//                         sh 'npm ci --prefer-offline'
-//                     }
-//                 }
-//             }
-//         }
+        stage('S3 & CloudFront') {
+            when { branch 'main' }
+            steps {
+                withCredentials([[
+                    $class: 'AmazonWebServicesCredentialsBinding',
+                    credentialsId: 'aws-credentials',
+                    accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                    secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                ]]) {
+                    dir('frontend') {
+                        sh '''
+                            set -e
+                            aws s3 sync dist/ "s3://${S3_BUCKET_NAME}/" --region "$AWS_REGION" --delete \
+                              --cache-control "public,max-age=31536000,immutable" --exclude "*.html"
+                            aws s3 cp dist/index.html "s3://${S3_BUCKET_NAME}/index.html" \
+                              --region "$AWS_REGION" \
+                              --cache-control "no-cache,no-store,must-revalidate" \
+                              --content-type "text/html"
+                            if [ -n "${CLOUDFRONT_DISTRIBUTION_ID:-}" ]; then
+                              aws cloudfront create-invalidation \
+                                --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+                                --paths "/*" >/dev/null
+                            fi
+                        '''
+                    }
+                }
+            }
+        }
+    }
 
-//         stage('Lint') {
-//             steps {
-//                 container('node') {
-//                     dir('frontend') {
-//                         sh 'npm run lint'
-//                     }
-//                 }
-//             }
-//         }
-
-//         stage('Build React App') {
-//             steps {
-//                 container('node') {
-//                     dir('frontend') {
-//                         withEnv([
-//                             "VITE_USER_SERVICE_URL=https://api.med-erp.${env.DOMAIN_NAME}/api/v1",
-//                             "VITE_PRODUCT_SERVICE_URL=https://api.med-erp.${env.DOMAIN_NAME}/api/v1",
-//                             "VITE_ORDER_SERVICE_URL=https://api.med-erp.${env.DOMAIN_NAME}/api/v1"
-//                         ]) {
-//                             sh 'npm run build'
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-
-//         stage('Upload to S3') {
-//             when { branch 'main' }
-//             steps {
-//                 withCredentials([[
-//                     $class: 'AmazonWebServicesCredentialsBinding',
-//                     credentialsId: 'AWS_CREDENTIALS',
-//                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-//                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-//                 ]]) {
-//                     container('awscli') {
-//                         dir('frontend') {
-//                             sh """
-//                                 # Sync static assets with long cache (1 year)
-//                                 aws s3 sync dist/ s3://${S3_BUCKET_NAME}/ \
-//                                   --region ${AWS_REGION} \
-//                                   --delete \
-//                                   --cache-control "public,max-age=31536000,immutable" \
-//                                   --exclude "*.html"
-
-//                                 # index.html with no cache (always fresh)
-//                                 aws s3 cp dist/index.html s3://${S3_BUCKET_NAME}/index.html \
-//                                   --region ${AWS_REGION} \
-//                                   --cache-control "no-cache,no-store,must-revalidate" \
-//                                   --content-type "text/html"
-
-//                                 echo "S3 upload complete."
-//                             """
-//                         }
-//                     }
-//                 }
-//             }
-//         }
-
-//         stage('Invalidate CloudFront') {
-//             when { branch 'main' }
-//             steps {
-//                 withCredentials([[
-//                     $class: 'AmazonWebServicesCredentialsBinding',
-//                     credentialsId: 'AWS_CREDENTIALS',
-//                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-//                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-//                 ]]) {
-//                     container('awscli') {
-//                         sh """
-//                             INVALIDATION_ID=\$(aws cloudfront create-invalidation \
-//                               --distribution-id ${CLOUDFRONT_DISTRIBUTION} \
-//                               --paths "/*" \
-//                               --query 'Invalidation.Id' \
-//                               --output text)
-
-//                             echo "CloudFront invalidation created: \$INVALIDATION_ID"
-
-//                             aws cloudfront wait invalidation-completed \
-//                               --distribution-id ${CLOUDFRONT_DISTRIBUTION} \
-//                               --id \$INVALIDATION_ID
-
-//                             echo "CloudFront cache cleared successfully."
-//                         """
-//                     }
-//                 }
-//             }
-//         }
-//     }
-
-//     post {
-//         success {
-//             echo "Frontend deployed successfully to S3 + CloudFront."
-//         }
-//         failure {
-//             echo "Frontend pipeline failed."
-//         }
-//         always {
-//             cleanWs()
-//         }
-//     }
-// }
-
-// pipeline {
-//     agent {
-//         label 'Anu'
-//     }
-
-//     environment {
-//         my_aws_credential = credentials('AWS-cred')
-//     }
-
-//     stages {
-//         stage('Checkout') {
-//             steps {
-//                 git branch: 'main', url: 'https://github.com/Anushree602/medical-erp.git'
-//             }
-//         }
-
-//         stage('Build - Frontend') {
-//             steps {
-//                 dir('frontend') {
-//                     sh '''
-//                     npm install
-//                     npm run build
-//                     '''
-//                 }
-//             }
-//             post {
-//                 success {
-//                     archiveArtifacts artifacts: 'frontend/dist/**', fingerprint: true
-//                 }
-//             }
-//         }
-
-//         stage('Upload Artifacts to S3') {
-//             steps {
-//                 dir('frontend') {
-//                     sh '''
-//                     aws s3 sync dist/ s3://deployment-by-anu --delete
-//                     aws s3 ls s3://deployment-by-anu/ --recursive
-//                     '''
-//                 }
-//             }
-//         }
-//     }
-
-//     post {
-//         success {
-//             echo 'Frontend deployed successfully.'
-//         }
-
-//         failure {
-//             echo 'Frontend deployment failed.'
-//         }
-//     }
-// }
-
+    post {
+        always { cleanWs() }
+    }
+}
