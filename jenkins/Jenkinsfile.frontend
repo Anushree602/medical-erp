@@ -7,9 +7,9 @@ pipeline {
     agent 
 
     environment {
-        AWS_REGION     = "${env.AWS_REGION ?: 'us-east-1'}"
-        S3_BUCKET_NAME = "${env.S3_BUCKET_NAME ?: 'med-erp-frontend-prod'}"
-        DOMAIN_NAME    = "${env.DOMAIN_NAME ?: 'example.com'}"
+        AWS_REGION     = "${env.AWS_REGION ?: 'ap-south-1'}"
+        S3_BUCKET_NAME = "${env.S3_BUCKET_NAME ?: 'deployment-by-anu'}"
+        DOMAIN_NAME    = "${env.DOMAIN_NAME ?: 'deploybyanushree.space'}"
     }
 
     options {
