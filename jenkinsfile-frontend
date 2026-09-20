@@ -69,18 +69,7 @@ pipeline {
             }
         }
     }
-  stage('Trigger Backend Pipeline') {
-            when {
-                branch 'main'
-            }
-
-            steps {
-                echo 'Frontend deployment successful. Triggering backend pipeline...'
-
-                build job: 'backend-pipeline',
-                      wait: false
-            }
-  }
+ 
     post {
         always { cleanWs() }
     }
