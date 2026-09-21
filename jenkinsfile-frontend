@@ -41,7 +41,6 @@ pipeline {
         }
 
         stage('S3 & CloudFront') {
-            when { branch 'main' }
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
@@ -51,7 +50,6 @@ pipeline {
                 ]]) {
                     dir('frontend') {
                         sh '''
-                            set -e
                             aws s3 sync dist/ "s3://${S3_BUCKET_NAME}/" --region "$AWS_REGION" --delete \
                               --cache-control "public,max-age=31536000,immutable" --exclude "*.html"
 
