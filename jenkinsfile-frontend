@@ -4,37 +4,80 @@
 // Set on the Jenkins controller (Global properties or job env): DOMAIN_NAME, S3_BUCKET_NAME, AWS_REGION, CLOUDFRONT_DISTRIBUTION_ID (optional)
 
 pipeline {
-    agent {
-         label 'Anu'
+    agent { label 'Anu' }
+     tools {
+        nodejs 'Node20'
     }
 
     environment {
         AWS_REGION     = "${env.AWS_REGION ?: 'ap-south-1'}"
         S3_BUCKET_NAME = "${env.S3_BUCKET_NAME ?: 'deployment-by-anu'}"
-        DOMAIN_NAME    = "${env.DOMAIN_NAME ?: 'deploybyanushree.space'}"
+        DOMAIN_NAME    = "${env.DOMAIN_NAME ?: 'api.deploybyanushree.space'}"
     }
 
     options {
         timeout(time: 20, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
     }
-
     stages {
-        stage('Checkout') {
-            steps { checkout scm }
+    stage('Test') {
+    steps {
+        dir('frontend') {
+            sh '''
+                set -e
+                npm ci
+                npm run lint
+            '''
         }
+    }
+}
+
+stage('SonarQube Analysis') {
+            steps {
+                dir('frontend') {
+                    script {
+                        def scannerHome = tool 'sonar-scanner'
+
+                        withSonarQubeEnv('sonar') {
+                            withCredentials([
+                                string(
+                                    credentialsId: 'sonar-token',
+                                    variable: 'SONAR_TOKEN'
+                                )
+                            ]) {
+                                sh """
+                                    ${scannerHome}/bin/sonar-scanner \
+                                      -Dsonar.projectKey=med-erp-frontend \
+                                      -Dsonar.sources=src \
+                                      -Dsonar.typescript.tsconfigPath=tsconfig.json \
+                                      -Dsonar.exclusions=node_modules/**,dist/**,coverage/** \
+                                      -Dsonar.host.url=\$SONAR_HOST_URL \
+                                      -Dsonar.token=\$SONAR_TOKEN
+                                """
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+stage('Quality Gate') {
+    steps {
+        timeout(time: 5, unit: 'MINUTES') {
+            waitForQualityGate abortPipeline: true
+        }
+    }
+}
 
         stage('Build') {
             steps {
                 dir('frontend') {
                     sh '''
-                        set -e
-                        npm ci
-                        npm run lint
-                        export VITE_USER_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
-                        export VITE_PRODUCT_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
-                        export VITE_ORDER_SERVICE_URL="https://api.med-erp.${DOMAIN_NAME}/api/v1"
+                        export VITE_USER_SERVICE_URL="https://${DOMAIN_NAME}/api/v1"
+                        export VITE_PRODUCT_SERVICE_URL="https://${DOMAIN_NAME}/api/v1"
+                        export VITE_ORDER_SERVICE_URL="https://${DOMAIN_NAME}/api/v1"
                         npm run build
+                        echo "Building frontend for: https://${DOMAIN_NAME}/api/v1"
                     '''
                 }
             }
@@ -44,23 +87,42 @@ pipeline {
             steps {
                 withCredentials([[
                     $class: 'AmazonWebServicesCredentialsBinding',
-                    credentialsId: 'AWS-cred',
+                    credentialsId: 'AWs-cred',
                     accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                     secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
                 ]]) {
                     dir('frontend') {
                         sh '''
+                            set -e
                             aws s3 sync dist/ "s3://${S3_BUCKET_NAME}/" --region "$AWS_REGION" --delete \
-                              --cache-control "public,max-age=31536000,immutable" --exclude "*.html"
-
+                              --cache-control "public,max-age=31536000,immutable" 
+                            
                         '''
                     }
                 }
             }
         }
     }
- 
+
+
     post {
-        always { cleanWs() }
+        always {
+            cleanWs(
+                deleteDirs: true,
+                disableDeferredWipeout: true,
+                notFailBuild: true
+            )
+        }
     }
 }
+
+
+// set -e
+//         aws s3 sync dist/ "s3://${S3_BUCKET_NAME}/" --region "$AWS_REGION" --delete \
+//         --cache-control "public,max-age=31536000,immutable" --exclude "*.html"
+
+// aws s3 cp dist/ "s3://${S3_BUCKET_NAME}/" \
+                            //   --region "$AWS_REGION" \
+                            //   --cache-control "no-cache,no-store,must-revalidate" \
+                            //   --content-type "text/html"
+                            
